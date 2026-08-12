@@ -17,6 +17,9 @@ dependencies = [
     "jax-rocm7-plugin",
     "jax-rocm7-pjrt",
 
+    # Triton (ROCm build) — required for Pallas on the GPU backend
+    "triton",
+
     # Standard JAX from PyPI
     "jax==0.10.0",
     "jaxlib==0.10.0",
@@ -34,3 +37,4 @@ rocm-sdk-libraries = { index = "amd-rocm" }
 rocm-sdk-device-gfx1030 = { index = "amd-rocm" }
 jax-rocm7-plugin = { index = "amd-rocm" }
 jax-rocm7-pjrt = { index = "amd-rocm" }
+triton = { index = "amd-rocm" }

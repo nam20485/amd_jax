@@ -47,6 +47,7 @@ rocm v7.14.0
 rocm-sdk-core v7.14.0
 rocm-sdk-libraries v7.14.0
 rocm-sdk-device-gfx1030 v7.14.0
+triton v3.8.0+git4cff872c.rocm7.14.0
 ```
 
 ## Prerequisites
@@ -155,6 +156,9 @@ dependencies = [
     "jax-rocm7-plugin",
     "jax-rocm7-pjrt",
 
+    # Triton (ROCm build) — required for Pallas on the GPU backend
+    "triton",
+
     # Standard JAX from PyPI
     "jax==0.10.0",
     "jaxlib==0.10.0",
@@ -172,6 +176,7 @@ rocm-sdk-libraries = { index = "amd-rocm" }
 rocm-sdk-device-gfx1030 = { index = "amd-rocm" }
 jax-rocm7-plugin = { index = "amd-rocm" }
 jax-rocm7-pjrt = { index = "amd-rocm" }
+triton = { index = "amd-rocm" }
 ```
 
 ### Why this form is necessary
@@ -224,7 +229,8 @@ amd-jax v0.1.0
 ├── rocm-sdk-core v7.14.0
 ├── rocm-sdk-device-gfx1030 v7.14.0
 │   └── rocm-sdk-libraries v7.14.0
-└── rocm-sdk-libraries v7.14.0
+├── rocm-sdk-libraries v7.14.0
+└── triton v3.8.0+git4cff872c.rocm7.14.0
 ```
 
 The important thing is that you do **not** see:
@@ -245,12 +251,13 @@ uv run python -c "import jax; print(jax.default_backend()); print(jax.devices())
 
 ## Pallas smoke test
 
-Create `pallas_smoke.py` with the following content:
+Create `src/pallas_smoke.py` with the following content:
 
 ```python
 import jax
 import jax.numpy as jnp
 import jax.experimental.pallas as pl
+import jax.experimental.pallas.triton as pltriton
 
 BLOCK_SIZE = 256
 
@@ -268,8 +275,8 @@ def vector_add(x: jax.Array, y: jax.Array) -> jax.Array:
     grid = (n // BLOCK_SIZE,)
 
     block_spec = pl.BlockSpec(
-        lambda i: (i,),
-        (BLOCK_SIZE,),
+        block_shape=(BLOCK_SIZE,),
+        index_map=lambda i: (i,),
     )
 
     return pl.pallas_call(
@@ -278,6 +285,7 @@ def vector_add(x: jax.Array, y: jax.Array) -> jax.Array:
         grid=grid,
         in_specs=[block_spec, block_spec],
         out_specs=block_spec,
+        compiler_params=pltriton.CompilerParams(),
         name="vector_add",
     )(x, y)
 
@@ -299,10 +307,12 @@ if __name__ == "__main__":
     main()
 ```
 
+> **ROCm note.** Pallas on AMD ROCm needs two things: (1) the `triton` package from AMD's ROCm wheel index (added in `pyproject.toml` above), and (2) forcing the **Triton** lowering backend — JAX defaults to the Mosaic GPU backend (`JAX_PALLAS_USE_MOSAIC_GPU=1`), which does not support ROCm. The `compiler_params=pltriton.CompilerParams()` argument does that per-call. Equivalently, set the env var once: `JAX_PALLAS_USE_MOSAIC_GPU=0 uv run python src/pallas_smoke.py`.
+
 Run it:
 
 ```bash
-uv run python pallas_smoke.py
+uv run python src/pallas_smoke.py
 ```
 
 Expected output ends with:
@@ -322,13 +332,13 @@ gfx1030
 AMD's official AI-stack support is strongest on Instinct GPUs and newer Radeon generations. Your card may work natively, but if JAX or Pallas fails to detect or compile for the device, try spoofing a supported RDNA3 target:
 
 ```bash
-HSA_OVERRIDE_GFX_VERSION=11.0.0 uv run python verify_jax.py
+HSA_OVERRIDE_GFX_VERSION=11.0.0 uv run python src/verify_jax.py
 ```
 
 or:
 
 ```bash
-HSA_OVERRIDE_GFX_VERSION=11.0.0 uv run python pallas_smoke.py
+HSA_OVERRIDE_GFX_VERSION=11.0.0 uv run python src/pallas_smoke.py
 ```
 
 If the override causes crashes, remove it and test native again:
@@ -368,14 +378,14 @@ If something fails, use these environment variables to get more synchronized and
 HIP_LAUNCH_BLOCKING=1 \
 AMD_LOG_LEVEL=3 \
 JAX_TRACEBACK_FILTERING=off \
-uv run python verify_jax.py
+uv run python src/verify_jax.py
 ```
 
 For XLA/IR dumps:
 
 ```bash
 XLA_FLAGS="--xla_dump_to=/tmp/xla_dump" \
-uv run python pallas_smoke.py
+uv run python src/pallas_smoke.py
 ```
 
 Then inspect:
@@ -454,8 +464,8 @@ uv tree | grep -E 'rocm|jax'
 uv run python -c "import jax; print(jax.default_backend()); print(jax.devices())"
 
 # run verification script
-uv run python verify_jax.py
+uv run python src/verify_jax.py
 
 # optional Pallas test
-uv run python pallas_smoke.py
+uv run python src/pallas_smoke.py
 ```

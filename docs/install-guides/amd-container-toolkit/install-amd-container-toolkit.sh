@@ -39,6 +39,10 @@ sudo apt-get install -y amd-container-toolkit
 echo "Configuring Docker for AMD GPU CDI access..."
 sudo amd-ctk runtime configure --runtime docker
 
+echo "Generating CDI spec for AMD GPUs..."
+sudo install -d -m 0755 /etc/cdi
+sudo amd-ctk cdi generate
+
 echo "Restarting Docker..."
 sudo systemctl restart docker
 
