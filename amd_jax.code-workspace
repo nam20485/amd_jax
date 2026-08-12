@@ -4,5 +4,8 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"python.defaultInterpreterPath": ".venv/bin/python",
+		"python.languageServer": "None"
+	}
 }
