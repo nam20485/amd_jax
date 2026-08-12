@@ -20,6 +20,7 @@ dependencies = [
     { name = "rocm-sdk-core" },
     { name = "rocm-sdk-device-gfx1030" },
     { name = "rocm-sdk-libraries" },
+    { name = "triton" },
 ]
 
 [package.metadata]
@@ -32,6 +33,7 @@ requires-dist = [
     { name = "rocm-sdk-core", specifier = ">=7.13", index = "https://repo.amd.com/rocm/whl-multi-arch/" },
     { name = "rocm-sdk-device-gfx1030", specifier = ">=7.13", index = "https://repo.amd.com/rocm/whl-multi-arch/" },
     { name = "rocm-sdk-libraries", specifier = ">=7.13", index = "https://repo.amd.com/rocm/whl-multi-arch/" },
+    { name = "triton", index = "https://repo.amd.com/rocm/whl-multi-arch/" },
 ]
 
 [[package]]
@@ -364,4 +366,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/bb/73/eda39f7a2d306ff0ffc574afd13c0bbb6d10a603d9a413998ee269487a80/scipy-1.18.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:b6f758e35f12757b5d95c00bc6de2438e229c2664b7a92e96f205959d9f2dfa4", size = 37404785, upload-time = "2026-06-19T15:00:34.072Z" },
     { url = "https://files.pythonhosted.org/packages/b7/d2/ae881ee28d014f38e0ccbfd974a06a919ba9af34f1f74bf42b5301891d63/scipy-1.18.0-cp313-cp313-win_amd64.whl", hash = "sha256:1afac4a847207c7ff8efd321734a50b06d0280b3b2a2c0fc2f413101747ad7c7", size = 36554943, upload-time = "2026-06-19T15:00:36.903Z" },
     { url = "https://files.pythonhosted.org/packages/70/3a/21154e2d54eb3639c6bf4dbae2e531c68356bfe95990daa30df33b30d556/scipy-1.18.0-cp313-cp313-win_arm64.whl", hash = "sha256:c5dbddf60e58c2312316d097271a8e73d40eaf2eabfa4d95ed7d3695bbf2ce7b", size = 24350911, upload-time = "2026-06-19T15:00:40.062Z" },
+]
+
+[[package]]
+name = "triton"
+version = "3.8.0+git4cff872c.rocm7.14.0"
+source = { registry = "https://repo.amd.com/rocm/whl-multi-arch/" }
+wheels = [
+    { url = "https://repo.amd.com/rocm/whl-multi-arch/triton-3.8.0%2Bgit4cff872c.rocm7.14.0-cp312-cp312-linux_x86_64.whl" },
 ]
