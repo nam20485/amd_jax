@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 .dirac-cache/symbol-index.db
+
+# Kilo extension state
+.kilo/
