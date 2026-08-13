@@ -2,10 +2,11 @@
 #
 # validate.sh — verify the JAX-on-ROCm setup end to end.
 #
-# Runs the two smoke-test scripts through `uv run` and reports PASS/FAIL for
-# each. Exits 0 only if BOTH succeed:
+# Runs the smoke-test scripts through `uv run` and reports PASS/FAIL for
+# each. Exits 0 only if ALL succeed:
 #   - src/verify_jax.py   : JAX detects the ROCm GPU and a matmul computes on it.
 #   - src/pallas_smoke.py : a tiled Pallas vector-add kernel compiles and runs.
+#   - src/verify_torch.py : PyTorch detects the ROCm GPU and a matmul computes on it.
 #
 # Usage (from anywhere):
 #   ./scripts/validate.sh
@@ -16,7 +17,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-SCRIPTS=("src/verify_jax.py" "src/pallas_smoke.py")
+SCRIPTS=("src/verify_jax.py" "src/pallas_smoke.py" "src/verify_torch.py")
 
 PASS=0
 FAIL=0
@@ -53,6 +54,7 @@ run_check() {
 
 run_check "JAX backend + GPU compute" "src/verify_jax.py"
 run_check "Pallas tiled vector-add kernel" "src/pallas_smoke.py"
+run_check "PyTorch backend + GPU compute" "src/verify_torch.py"
 
 echo
 echo "================================================================"
