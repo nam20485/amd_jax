@@ -23,6 +23,19 @@ dependencies = [
     # Standard JAX from PyPI
     "jax==0.10.0",
     "jaxlib==0.10.0",
+
+    # PyTorch (ROCm build) — multi-arch wheels with a device extra, see
+    # https://github.com/ROCm/TheRock/blob/main/RELEASES.md
+    # (compatibility matrix row: torch 2.12 / torchvision 0.27 / torchaudio 2.11)
+    "torch[device-gfx1030]==2.12.0",
+    "torchvision[device-gfx1030]==0.27.0",
+    "torchaudio==2.11.0",
+
+    # GPU device packages pulled by the torch/torchvision device extras.
+    # Only published on the AMD index, so they must be direct deps with
+    # explicit source mappings (same pattern as rocm-sdk-* above).
+    "amd-torch-device-gfx1030==2.12.0",
+    "amd-torchvision-device-gfx1030==0.27.0",
 ]
 
 [[tool.uv.index]]
@@ -38,3 +51,8 @@ rocm-sdk-device-gfx1030 = { index = "amd-rocm" }
 jax-rocm7-plugin = { index = "amd-rocm" }
 jax-rocm7-pjrt = { index = "amd-rocm" }
 triton = { index = "amd-rocm" }
+torch = { index = "amd-rocm" }
+torchvision = { index = "amd-rocm" }
+torchaudio = { index = "amd-rocm" }
+amd-torch-device-gfx1030 = { index = "amd-rocm" }
+amd-torchvision-device-gfx1030 = { index = "amd-rocm" }
