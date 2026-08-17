@@ -60,9 +60,13 @@ Why these flags:
                         -ngl is explicitly set)
 - --cache-reuse 256 → reuses KV across agent tool-loop turns (big speedup)
 - --reasoning-format none → suppresses `<think>` tokens; REQUIRED for
-                            agent tool-calling (Kilo/Cline/OpenCode) to parse
+                            agent tool-calling (Kilo/Cline/OpenCode) to
+                            parse. OMITTED in the 8b-r profile, which keeps
+                            reasoning output (see Part 2 for 8b-r caveats)
 - --jinja          → correct Qwen3 chat/tool-call template rendering
-- -fa on + --spec-type ngram-simple → your verified fastest combo
+- -fa on + --spec-type ngram-simple → your verified fastest combo (8b-s
+                        swaps in a 0.6B draft model instead: -md + -ngld 99 +
+                        --spec-draft-n-max 8)
 
 ## 1.2 Shell aliases (marker-guarded block in ~/.bashrc)
 
@@ -72,6 +76,7 @@ One-time setup — the markers make it replaceable without hand-editing:
     # >>> llama aliases >>>
     alias ai8='llama-start 8b'      # daily driver, 32K ctx, ~62 t/s
     alias ai8r='llama-start 8b-r'   # reasoning-enabled 8B, 32K ctx, ~62 t/s
+    alias ai8s='llama-start 8b-s'   # 8B + 0.6B draft spec-decode, 32K ctx
     alias ai14='llama-start 14b'    # architect, 16K ctx, ~20 t/s
     alias aistop='pkill -f llama-server'
     alias ailog='tail -f ~/.llama-server.log'
@@ -84,8 +89,10 @@ The `# >>>` / `# <<<` comment lines just delimit the block so it's easy
 to spot (and select-and-delete) if you ever edit it by hand.
 
 Usage:
-    ai8      # start 8B profile
-    ai14     # switch to 14B (auto-kills 8B first)
+    ai8      # start 8B profile (no reasoning — the agent-safe default)
+    ai8r     # start 8B reasoning profile (same model, `<think>` kept)
+    ai8s     # start 8B + 0.6B draft-model spec-decode profile
+    ai14     # switch to 14B (auto-kills any running profile first)
     aistop   # stop
 
 ## 1.3 Verify the API
@@ -97,6 +104,17 @@ Usage:
       -d '{"model":"qwen3-8b","messages":[{"role":"user","content":"ping"}],"max_tokens":16}'
 
 ## 1.4 Optional: fixed-profile systemd unit (auto-start 8B at boot)
+
+How --api-key-file works under systemd: llama-server reads the file's
+(trimmed) content ONCE at startup and requires it as the Bearer token — it
+does not watch the file, so rotating the key needs a service restart. The
+llama-start mktemp-and-delete-on-exit trick doesn't apply here because
+systemd execs llama-server directly (no wrapper to create/clean the temp
+file), so you need a persistent key file readable only by the service user:
+
+    mkdir -p ~/.config/llama.cpp
+    printf 'sk-local\n' > ~/.config/llama.cpp/api-key
+    chmod 600 ~/.config/llama.cpp/api-key
 
     sudo tee /etc/systemd/system/llama-cpp.service <<'EOF'
     [Unit]
@@ -112,6 +130,7 @@ Usage:
       --alias qwen3-8b -ngl 99 -c 32768 -b 2048 -ub 1024 \
       --cache-type-k q8_0 --cache-type-v q8_0 -fa on \
       --spec-type ngram-simple --cache-reuse 256 \
+      --api-key-file %h/.config/llama.cpp/api-key \
       --reasoning-format none --jinja --host 127.0.0.1 --port 9999
     Restart=on-failure
 
@@ -120,7 +139,20 @@ Usage:
     EOF
     sudo systemctl daemon-reload && sudo systemctl enable --now llama-cpp
 
-(Note: don't run systemd unit AND llama-start at once; pick one workflow.)
+(%h expands to the home dir of User=. For an auto-start 8b-r variant: drop
+--reasoning-format none and set --alias qwen3-8b-r — but remember agents
+must then NOT point at it.)
+
+Hardened alternative — systemd credentials (key never lives in $HOME or
+backups): `sudo install -m600 /dev/null /etc/llama-cpp.key` and write the
+key into it (root-owned), then in [Service] add
+`LoadCredential=api-key:/etc/llama-cpp.key` and use
+`--api-key-file %d/api-key` in ExecStart. %d resolves to a per-service
+tmpfs dir (/run/credentials/llama-cpp.service/), auto-cleaned on stop and
+readable only by the service user.
+
+(Notes: don't run systemd unit AND llama-start at once; pick one workflow.
+Key rotation = edit the key file, then `systemctl restart llama-cpp`.)
 
 =====================================================================
 PART 2 — Client integrations
@@ -130,10 +162,16 @@ All clients point at the SAME endpoint:  <http://127.0.0.1:9999/v1>
 API key: `sk-local` — the server enforces it (--api-key-file; the key is
 passed via a 0600 temp file, not argv, so it doesn't leak in ps). Change it by
 editing LLOCAL_LLAMA_CPP_API_KEY at the top of llama-start.sh, then update
-every client to match. Model id: qwen3-8b or qwen3-14b.
-Switching models = just run `ai8` / `ai14`; clients keep the same URL.
-(Set client context window BELOW the active profile's ctx — 24576 for 8b,
-12288 for 14b. The server counts prompt + output against -c and rejects any
+every client to match. Model id: qwen3-8b, qwen3-8b-r, qwen3-8b-s, or
+qwen3-14b.
+Switching profiles = just run `ai8` / `ai8r` / `ai8s` / `ai14`; clients keep
+the same URL, but the configured model id must match the ACTIVE profile — with ai8r
+running, a client still set to qwen3-8b gets a model-not-found error.
+Also: 8b-r emits reasoning (`<think>`) output, which breaks agent
+tool-call parsing — keep Kilo/Cline/OpenCode on ai8 and use 8b-r only for
+interactive chats where you want the reasoning trace.
+(Set client context window BELOW the active profile's ctx — 24576 for 8b
+and 8b-r, 12288 for 14b. The server counts prompt + output against -c and rejects any
 single prompt > -c with `exceed_context_size_error`, so the client must
 compact/truncate before that; the 8K gap leaves output headroom.)
 
@@ -178,6 +216,14 @@ compact/truncate before that; the 8K gap leaves output headroom.)
               "name": "Qwen3-8B  (local, 32K)",
               "limit": { "context": 24576, "output": 8192 }
             },
+            "qwen3-8b-r": {
+              "name": "Qwen3-8B reasoning (local, 32K)",
+              "limit": { "context": 24576, "output": 8192 }
+            },
+            "qwen3-8b-s": {
+              "name": "Qwen3-8B draft spec-decode (local, 32K)",
+              "limit": { "context": 24576, "output": 8192 }
+            },
             "qwen3-14b": {
               "name": "Qwen3-14B (local, 16K)",
               "limit": { "context": 12288, "output": 8192 }
@@ -190,9 +236,11 @@ compact/truncate before that; the 8K gap leaves output headroom.)
 Run:
     export OPENAI_API_KEY=sk-local
     opencode --model local/qwen3-8b
+    opencode --model local/qwen3-8b-r   # only while ai8r is the running profile
     opencode --model local/qwen3-14b
 
 Tip: agent loops burn tokens fast → default to local/qwen3-8b (62 t/s);
+local/qwen3-8b-r adds <think> traces (pick it only for planning sessions);
 reserve local/qwen3-14b for deep architectural/debugging sessions.
 
 ## 2.4 Kilo Code CLI
@@ -229,23 +277,22 @@ or ~/.qwen/settings.json:
 
 (Exact key names vary slightly by version; the env-var route always works.)
 
-## 2.6 Gemini Code Assist — NOT possible
-
-It's a closed Google-cloud service; it cannot point at a local OpenAI-compatible
-endpoint. Keep it for Gemini models only; use the clients above for local.
-
 =====================================================================
 PART 3 — Daily workflow cheat-sheet
 =====================================================================
 
     ai8                       # coding/refactor/boilerplate: 32K ctx, ~62 t/s
+    ai8r                      # interactive reasoning chats: same 8B, <think> kept
+    ai8s                      # 8B + 0.6B draft spec-decode: 32K ctx (experiment;
+                              #   n-gram ai8 stayed faster in the b10448 bench)
     ai14                      # architecture/debugging:      16K ctx, ~20 t/s
     ailog                     # watch server logs
     aivram                    # live VRAM usage (keep < ~11500 MB)
     aistop                    # free the GPU
 
 Profile VRAM budget (must stay under ~11.5 GB):
-    8B : weights 5.0 + KV@32K q8_0 4.0 + overhead 1.0 ≈ 10.0 GB ✔
+    8B : weights 5.0 + KV@32K q8_0 4.0 + overhead 1.0 ≈ 10.0 GB ✔ (8b-r same)
+    8B-s: 8B budget + 0.65 draft weights + draft KV ≈ 10.7 GB ✔
     14B: weights 8.5 + KV@16K q8_0 1.3 + overhead 1.0 ≈ 10.8 GB ✔
     14B @ 32K would be ~12.1 GB → spills to PCIe → unusable. Don't.
 
@@ -267,7 +314,13 @@ Troubleshooting:
                                        unverified on this card).
 - Slow generation suddenly?            → check aivram; you're over VRAM, spill to RAM
 - Tool calls failing in Kilo/Cline?    → confirm --reasoning-format none + --jinja
-- Model id mismatch errors?            → use exactly qwen3-8b / qwen3-14b (--alias)
-- Want draft-model spec decode again?  → replace --spec-type ngram-simple with
-                                           -md ~/models/Qwen3-0.6B-Q8_0.gguf
-                                           -ngld 99 --spec-draft-n-max 8
+- Model id mismatch errors?            → use exactly the ACTIVE alias:
+                                         qwen3-8b / qwen3-8b-r / qwen3-8b-s /
+                                         qwen3-14b (ai8r serves qwen3-8b-r, etc.)
+- `<think>` blocks breaking an agent?  → the 8b-r profile is active; run ai8
+                                         (--reasoning-format none is required
+                                         for tool-calling agents)
+- Draft-model spec decode              → already a profile: ai8s (8b-s) runs
+                                         -md Qwen3-0.6B-Q8_0.gguf -ngld 99
+                                         --spec-draft-n-max 8 instead of
+                                         --spec-type ngram-simple
