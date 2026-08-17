@@ -27,6 +27,8 @@ if pgrep -f "$LLAMA_DIR/llama-server" >/dev/null; then
   echo "Gone."
 fi
 
+SPEC_ARGS=(--spec-type ngram-simple)   # default; 8b-s overrides with a draft model
+
 case "$PROFILE" in
   8b)
     MODEL="$MODELS/Qwen3-8B-Q4_K_M.gguf"
@@ -39,18 +41,26 @@ case "$PROFILE" in
     CTX=32768          # same as 8b but reasoning/think-tokens enabled
     REASONING=1        # non-empty → omit --reasoning-format none
     ;;
+  8b-s)
+    MODEL="$MODELS/Qwen3-8B-Q4_K_M.gguf"
+    DRAFT="$MODELS/Qwen3-0.6B-Q8_0.gguf"
+    ALIAS="qwen3-8b-s"
+    CTX=32768          # 8B with 0.6B draft-model speculative decoding
+    SPEC_ARGS=(-md "$DRAFT" -ngld 99 --spec-draft-n-max 8)
+    ;;
   14b)
     MODEL="$MODELS/Qwen3-14B-Q4_K_M.gguf"
     ALIAS="qwen3-14b"
     CTX=16384          # architect profile, keep ctx lower for VRAM
     ;;
   *)
-    echo "Usage: llama-start [8b|8b-r|14b] [port]"; exit 1 ;;
+    echo "Usage: llama-start [8b|8b-r|8b-s|14b] [port]"; exit 1 ;;
 esac
 
 # Fail fast on missing prerequisites
 [ -x "$LLAMA_DIR/llama-server" ] || { echo "ERROR: llama-server not found at $LLAMA_DIR" >&2; exit 1; }
 [ -f "$MODEL" ] || { echo "ERROR: model not found: $MODEL" >&2; exit 1; }
+[ -z "${DRAFT:-}" ] || [ -f "$DRAFT" ] || { echo "ERROR: draft model not found: $DRAFT" >&2; exit 1; }
 command -v curl >/dev/null || { echo "ERROR: curl is required for the health check" >&2; exit 1; }
 
 nohup "$LLAMA_DIR/llama-server" \
@@ -63,7 +73,7 @@ nohup "$LLAMA_DIR/llama-server" \
   -b 2048 -ub 1024 \
   --cache-type-k q8_0 --cache-type-v q8_0 \
   -fa on \
-  --spec-type ngram-simple \
+  "${SPEC_ARGS[@]}" \
   --cache-reuse 256 \
   $([ -n "${REASONING:-}" ] || echo --reasoning-format none) \
   --jinja \
