@@ -5,13 +5,27 @@ LLAMA_DIR="$HOME/llama-b10448"
 MODELS="$HOME/models"
 PROFILE="${1:-8b}"
 PORT="${2:-9999}"   # default avoids common dev-service collisions (8080 et al.)
+LLOCAL_LLAMA_CPP_API_KEY="${LLOCAL_LLAMA_CPP_API_KEY:-sk-local}"   # API key clients must send; edit here to change
+
+# Pass the key via a 0600 temp file, not argv, so it never shows in ps output
+KEY_FILE="$(mktemp)"
+trap 'rm -f "$KEY_FILE"' EXIT
+printf '%s\n' "$LLOCAL_LLAMA_CPP_API_KEY" > "$KEY_FILE"
 
 # Kill any previous instance (only one fits in 12 GB VRAM)
-pkill -f "$LLAMA_DIR/llama-server" 2>/dev/null || true
-for _ in $(seq 1 30); do
-  pgrep -f "$LLAMA_DIR/llama-server" >/dev/null || break
-  sleep 1
-done
+if pgrep -f "$LLAMA_DIR/llama-server" >/dev/null; then
+  echo "Existing llama-server found — killing..."
+  pkill -f "$LLAMA_DIR/llama-server" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    pgrep -f "$LLAMA_DIR/llama-server" >/dev/null || break
+    sleep 1
+  done
+  if pgrep -f "$LLAMA_DIR/llama-server" >/dev/null; then
+    echo "ERROR: existing server still running after 30s; aborting (VRAM not freed)" >&2
+    exit 1
+  fi
+  echo "Gone."
+fi
 
 case "$PROFILE" in
   8b)
@@ -19,13 +33,19 @@ case "$PROFILE" in
     ALIAS="qwen3-8b"
     CTX=32768          # big-context workspace ingestion profile
     ;;
+  8b-r)
+    MODEL="$MODELS/Qwen3-8B-Q4_K_M.gguf"
+    ALIAS="qwen3-8b-r"
+    CTX=32768          # same as 8b but reasoning/think-tokens enabled
+    REASONING=1        # non-empty → omit --reasoning-format none
+    ;;
   14b)
     MODEL="$MODELS/Qwen3-14B-Q4_K_M.gguf"
     ALIAS="qwen3-14b"
     CTX=16384          # architect profile, keep ctx lower for VRAM
     ;;
   *)
-    echo "Usage: llama-start [8b|14b] [port]"; exit 1 ;;
+    echo "Usage: llama-start [8b|8b-r|14b] [port]"; exit 1 ;;
 esac
 
 # Fail fast on missing prerequisites
@@ -36,14 +56,16 @@ command -v curl >/dev/null || { echo "ERROR: curl is required for the health che
 nohup "$LLAMA_DIR/llama-server" \
   -m "$MODEL" \
   --alias "$ALIAS" \
+  --api-key-file "$KEY_FILE" \
   -ngl 99 \
+  -fit off \
   -c "$CTX" \
   -b 2048 -ub 1024 \
   --cache-type-k q8_0 --cache-type-v q8_0 \
   -fa on \
   --spec-type ngram-simple \
   --cache-reuse 256 \
-  --reasoning-format none \
+  $([ -n "${REASONING:-}" ] || echo --reasoning-format none) \
   --jinja \
   --host 127.0.0.1 --port "$PORT" \
   > "$HOME/.llama-server.log" 2>&1 &
