@@ -33,11 +33,15 @@ PART 1 — Save the flag sets as switchable profiles
 The versioned source is `scripts/llama-start.sh` in this repo. Deploy:
 
     mkdir -p ~/.local/bin
-    cp scripts/llama-start.sh ~/.local/bin/llama-start
-    chmod +x ~/.local/bin/llama-start
+    ln -sf /home/nam20485/src/github/nam20485/amd_jax/scripts/llama-start.sh \
+      ~/.local/bin/llama-start
 
-(`~/.local/bin` is on PATH by default on Debian.) Edit the script in the
-repo, re-copy to deploy — don't edit the deployed copy or they drift.
+(Use the absolute path to the main checkout — not `$(pwd)` — so you don't
+accidentally link to a transient git worktree or second clone.)
+
+(`~/.local/bin` is on PATH by default on Debian.) The symlink always runs
+the repo version — edit `scripts/llama-start.sh` and the change is live on
+the next launch; no re-deploy step.
 
 What it does: kills any running instance and waits for VRAM to free,
 fail-fast checks the llama-server binary / model file / curl, launches the
@@ -47,6 +51,13 @@ lines if the server never came up.
 Why these flags:
 
 - --alias          → stable model id clients can reference (qwen3-8b / qwen3-14b)
+- --api-key-file   → requires clients to authenticate; key is written to a
+                     0600 temp file (deleted at exit) so it never appears in
+                     ps output; value is the LLOCAL_LLAMA_CPP_API_KEY var at
+                     the top of llama-start.sh — edit the script to change it
+- -ngl 99 + -fit off → full GPU offload; -fit off silences the "failed to
+                        fit params" warning (auto-fit aborts anyway since
+                        -ngl is explicitly set)
 - --cache-reuse 256 → reuses KV across agent tool-loop turns (big speedup)
 - --reasoning-format none → suppresses `<think>` tokens; REQUIRED for
                             agent tool-calling (Kilo/Cline/OpenCode) to parse
@@ -60,6 +71,7 @@ One-time setup — the markers make it replaceable without hand-editing:
     cat >> ~/.bashrc <<'EOF'
     # >>> llama aliases >>>
     alias ai8='llama-start 8b'      # daily driver, 32K ctx, ~62 t/s
+    alias ai8r='llama-start 8b-r'   # reasoning-enabled 8B, 32K ctx, ~62 t/s
     alias ai14='llama-start 14b'    # architect, 16K ctx, ~20 t/s
     alias aistop='pkill -f llama-server'
     alias ailog='tail -f ~/.llama-server.log'
@@ -78,8 +90,9 @@ Usage:
 
 ## 1.3 Verify the API
 
-    curl http://127.0.0.1:9999/v1/models
+    curl -H "Authorization: Bearer sk-local" http://127.0.0.1:9999/v1/models
     curl http://127.0.0.1:9999/v1/chat/completions \
+      -H "Authorization: Bearer sk-local" \
       -H "Content-Type: application/json" \
       -d '{"model":"qwen3-8b","messages":[{"role":"user","content":"ping"}],"max_tokens":16}'
 
@@ -114,9 +127,15 @@ PART 2 — Client integrations
 =====================================================================
 
 All clients point at the SAME endpoint:  <http://127.0.0.1:9999/v1>
-API key: anything non-empty (e.g. "sk-local"). Model id: qwen3-8b or qwen3-14b.
+API key: `sk-local` — the server enforces it (--api-key-file; the key is
+passed via a 0600 temp file, not argv, so it doesn't leak in ps). Change it by
+editing LLOCAL_LLAMA_CPP_API_KEY at the top of llama-start.sh, then update
+every client to match. Model id: qwen3-8b or qwen3-14b.
 Switching models = just run `ai8` / `ai14`; clients keep the same URL.
-(Set client context window to match active profile: 32768 for 8b, 16384 for 14b.)
+(Set client context window BELOW the active profile's ctx — 24576 for 8b,
+12288 for 14b. The server counts prompt + output against -c and rejects any
+single prompt > -c with `exceed_context_size_error`, so the client must
+compact/truncate before that; the 8K gap leaves output headroom.)
 
 ## 2.1 Kilo Code (VS Code VSIX)
 
@@ -125,7 +144,9 @@ Switching models = just run `ai8` / `ai14`; clients keep the same URL.
    - Base URL:   <http://127.0.0.1:9999/v1>
    - API Key:    sk-local
    - Model ID:   qwen3-8b
-3. Advanced: set context window 32768, max output tokens 8192.
+3. Advanced: set context window 24576 (NOT 32768 — see the note above),
+   max output tokens 8192. If Kilo autodetects a larger window from the
+   GGUF metadata (Qwen3 advertises 32K+/YaRN), override it manually.
 4. Disable any "vision/image" option (text-only model).
 
 ## 2.2 Cline (VS Code VSIX)
@@ -134,7 +155,8 @@ Switching models = just run `ai8` / `ai14`; clients keep the same URL.
 2. Base URL: <http://127.0.0.1:9999/v1>
 3. API Key: sk-local
 4. Model ID: qwen3-8b
-5. Manually set Context Window Size: 32768 (Cline doesn't autodetect)
+5. Manually set Context Window Size: 24576 (below server ctx; Cline doesn't
+   autodetect)
 6. Uncheck "Use VLM" / image support.
 
 ## 2.3 OpenCode CLI (your main terminal agent)
@@ -152,8 +174,14 @@ Switching models = just run `ai8` / `ai14`; clients keep the same URL.
             "apiKey": "sk-local"
           },
           "models": {
-            "qwen3-8b":  { "name": "Qwen3-8B  (local, 32K)" },
-            "qwen3-14b": { "name": "Qwen3-14B (local, 16K)" }
+            "qwen3-8b": {
+              "name": "Qwen3-8B  (local, 32K)",
+              "limit": { "context": 24576, "output": 8192 }
+            },
+            "qwen3-14b": {
+              "name": "Qwen3-14B (local, 16K)",
+              "limit": { "context": 12288, "output": 8192 }
+            }
           }
         }
       }
@@ -227,6 +255,16 @@ context fits in a few thousand tokens and leaves room for the answer.
 
 Troubleshooting:
 
+- "request (N tokens) exceeds the available
+  context size (32768)"            → the client sent a prompt bigger than -c.
+                                       Fix client-side: set the client context
+                                       window below server ctx (24576 for 8b),
+                                       then compact (/compact, or a fresh
+                                       session) to clear the oversized one.
+                                       Don't raise -c on 8b: 40K ≈ 11.0 GB is
+                                       the VRAM ceiling; 48K only fits with
+                                       --cache-type-k/v q4_0 (~9 GB, quality
+                                       unverified on this card).
 - Slow generation suddenly?            → check aivram; you're over VRAM, spill to RAM
 - Tool calls failing in Kilo/Cline?    → confirm --reasoning-format none + --jinja
 - Model id mismatch errors?            → use exactly qwen3-8b / qwen3-14b (--alias)
