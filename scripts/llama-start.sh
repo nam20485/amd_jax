@@ -3,8 +3,20 @@ set -euo pipefail
 
 LLAMA_DIR="$HOME/llama-b10448"
 MODELS="$HOME/models"
-PROFILE="${1:-8b}"
-PORT="${2:-9999}"   # default avoids common dev-service collisions (8080 et al.)
+# Flags (may appear anywhere): --tail → follow ~/.llama-server.log after startup
+TAIL=0
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --tail) TAIL=1 ;;
+    -*)     echo "llama-start: unknown option: $arg" >&2
+          echo "Usage: llama-start [--tail] [8b|8b-r|8b-s|14b] [port]" >&2
+          exit 1 ;;
+    *)      POSITIONAL+=("$arg") ;;
+  esac
+done
+PROFILE="${POSITIONAL[0]:-8b}"
+PORT="${POSITIONAL[1]:-9999}"   # default avoids common dev-service collisions (8080 et al.)
 LLOCAL_LLAMA_CPP_API_KEY="${LLOCAL_LLAMA_CPP_API_KEY:-sk-local}"   # API key clients must send; edit here to change
 
 # Pass the key via a 0600 temp file, not argv, so it never shows in ps output
@@ -54,7 +66,7 @@ case "$PROFILE" in
     CTX=16384          # architect profile, keep ctx lower for VRAM
     ;;
   *)
-    echo "Usage: llama-start [8b|8b-r|8b-s|14b] [port]"; exit 1 ;;
+    echo "Usage: llama-start [--tail] [8b|8b-r|8b-s|14b] [port]"; exit 1 ;;
 esac
 
 # Fail fast on missing prerequisites
@@ -77,6 +89,7 @@ nohup "$LLAMA_DIR/llama-server" \
   --cache-reuse 256 \
   $([ -n "${REASONING:-}" ] || echo --reasoning-format none) \
   --jinja \
+  --tools all \
   --host 127.0.0.1 --port "$PORT" \
   > "$HOME/.llama-server.log" 2>&1 &
 
@@ -91,4 +104,7 @@ if [ "${exit_ok:-0}" -ne 1 ]; then
   exit 1
 fi
 echo "READY → http://127.0.0.1:$PORT/v1  (model id: $ALIAS)"
+if [ "$TAIL" -eq 1 ]; then
+  tail -f "$HOME/.llama-server.log"   # Ctrl-C exits the tail; server keeps running
+fi
 echo "Logs: tail -f ~/.llama-server.log"

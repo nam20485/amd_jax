@@ -47,6 +47,8 @@ What it does: kills any running instance and waits for VRAM to free,
 fail-fast checks the llama-server binary / model file / curl, launches the
 profile, then health-checks up to 120 s and exits 1 with the last 20 log
 lines if the server never came up.
+`--tail` follows ~/.llama-server.log in the foreground after READY (Ctrl-C
+stops only the tail, not the server).
 
 Why these flags:
 
@@ -64,6 +66,11 @@ Why these flags:
                             parse. OMITTED in the 8b-r profile, which keeps
                             reasoning output (see Part 2 for 8b-r caveats)
 - --jinja          → correct Qwen3 chat/tool-call template rendering
+- --tools all       → enables llama-server's built-in agent tools (read_file,
+                      grep_search, exec_shell_command, write_file, ...). This
+                      is server-side code execution: fine on this API-key'd
+                      127.0.0.1-only server, but note it also forces CORS to
+                      localhost (agent WebUI browser calls still work)
 - -fa on + --spec-type ngram-simple → your verified fastest combo (8b-s
                         swaps in a 0.6B draft model instead: -md + -ngld 99 +
                         --spec-draft-n-max 8)
